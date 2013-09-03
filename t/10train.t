@@ -1,8 +1,17 @@
 use strict;
 use warnings;
-use Test::More tests => 7;
+use Test::More;
 
 use Redis::NaiveBayes;
+
+eval {
+    Redis->new;
+    1;
+} or do {
+    plan skip_all => "No Redis instance running";
+};
+
+plan tests => 7;
 
 
 sub tokenizer {

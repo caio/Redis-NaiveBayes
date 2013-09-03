@@ -1,8 +1,17 @@
 use strict;
 use warnings;
-use Test::More tests => 4;
+use Test::More;
 
 use Redis::NaiveBayes;
+
+eval {
+    Redis->new;
+    1;
+} or do {
+    plan skip_all => "No Redis instance running";
+};
+
+plan tests => 4;
 
 
 my $ns  = 'test:';
