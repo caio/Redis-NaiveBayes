@@ -4,12 +4,75 @@ package Redis::NaiveBayes;
 use strict;
 use warnings;
 
+use Redis;
+
+use constant {
+    DEBUG => 0,
+    LABELS => 'labels',
+};
+
 
 sub new {
-    my ($class) = @_;
+    my ($class, %args) = @_;
+    my $self = bless {}, $class;
 
-    my $self = {};
-    bless $self, $class;
+    $self->{redis}      = $args{redis}      || Redis->new(%args);
+    $self->{correction} = $args{correction} || 0.001;
+    $self->{namespace}  = $args{namespace}  or die "Missing namespace";
+    $self->{tokenizer}  = $args{tokenizer}  or die "Missing tokenizer";
+
+    return $self;
+}
+
+sub _exec {
+    my ($self, $command, $key, @rest) = @_;
+
+    DEBUG and $self->_debug("Will execute command '%s' on '%s'", ($command, $self->{namespace} . $key));
+    return $self->{redis}->$command($self->{namespace} . $key, @rest);
+}
+
+sub _debug {
+    my $self = shift;
+    printf STDERR @_;
+}
+
+sub flush {
+    my ($self) = @_;
+
+    foreach my $label ($self->_labels) {
+        $self->_exec('del', $label);
+    }
+    $self->_exec('del', 'labels');
+}
+
+sub train {
+    my ($self, $label, $item) = @_;
+
+    DEBUG and $self->_debug("Training as '%s' the following: '%s'", $label, $item);
+
+    $self->_exec('sadd', LABELS, $label);
+
+    my $occurrences = $self->{tokenizer}->($item);
+
+    foreach my $token (keys %$occurrences) {
+        my $score = $occurrences->{$token};
+
+        $self->_exec('hincrby', $label, $token, $score);
+    }
+
+    return $occurrences;
+}
+
+sub _labels {
+    my ($self) = @_;
+
+    return $self->_exec('smembers', LABELS);
+}
+
+sub _priors {
+    my ($self, $label) = @_;
+
+    return { $self->_exec('hgetall', $label) };
 }
 
 
