@@ -3,6 +3,7 @@ package Redis::NaiveBayes;
 
 use strict;
 use warnings;
+use List::Util qw(sum);
 
 use Redis;
 
@@ -58,6 +59,39 @@ sub train {
         my $score = $occurrences->{$token};
 
         $self->_exec('hincrby', $label, $token, $score);
+    }
+
+    return $occurrences;
+}
+
+# FIXME there are some obvious race conditions here if we're not using pipielines
+sub untrain {
+    my ($self, $label, $item) = @_;
+
+    DEBUG and $self->_debug("UNtraining as '%s' the following: '%s'", $label, $item);
+
+    my $occurrences = $self->{tokenizer}->($item);
+
+    foreach my $token (keys %$occurrences) {
+        # Do nothing when we have no data for $token
+        my $current = $self->_exec('hget', $label, $token);
+        return unless $current;
+
+        my $score = $occurrences->{$token};
+
+        if ($current - $score > 0) {
+            $self->_exec('hincrby', $label, $token, -1 * $score);
+        }
+        else {
+            $self->_exec('hdel', $label, $token);
+        }
+    }
+
+    # Delete label hash if its total score is zero/negative
+    my $total = sum($self->_exec('hvals', $label));
+    if (! $total or $total < 0) {
+        $self->_exec('del', $label);
+        $self->_exec('srem', LABELS, $label);
     }
 
     return $occurrences;
