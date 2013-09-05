@@ -29,6 +29,32 @@ my $LUA_FLUSH = q{
     redis.call('del', KEYS[1]);
 };
 
+my $LUA_TRAIN = q{
+    -- KEYS:
+    --   1: LABELS set
+    --   2: label being updated
+    -- ARGV:
+    --   1: raw label name being trained
+    --   2: number of tokens being updated
+    --   3-X: token being updated
+    --   X+1-N: value to increment corresponding token
+
+    redis.call('sadd', KEYS[1], ARGV[1])
+
+    local label      = KEYS[2]
+    local num_tokens = ARGV[2]
+
+    for index, token in ipairs(ARGV) do
+        if index > num_tokens + 2 then
+            break
+        end
+        if index > 2 then
+            redis.call('hincrby', label, token, ARGV[index + num_tokens])
+        end
+    end
+};
+
+
 sub new {
     my ($class, %args) = @_;
     my $self = bless {}, $class;
@@ -49,6 +75,7 @@ sub _load_scripts {
     $self->{scripts} = {};
 
     ($self->{scripts}->{flush}) = $self->{redis}->script_load($LUA_FLUSH);
+    ($self->{scripts}->{train}) = $self->{redis}->script_load($LUA_TRAIN);
 }
 
 sub _exec {
@@ -84,16 +111,15 @@ sub train {
 
     DEBUG and $self->_debug("Training as '%s' the following: '%s'", $label, $item);
 
-    $self->_exec('sadd', LABELS, $label);
+    my @keys = ($self->{namespace} . LABELS, $self->{namespace} . $label);
+    my @argv = ($label);
 
     my $occurrences = $self->{tokenizer}->($item);
     die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
-    for my $token (keys %$occurrences) {
-        my $score = $occurrences->{$token};
+    push @argv, (scalar keys %$occurrences), keys %$occurrences, values %$occurrences;
 
-        $self->_exec('hincrby', $label, $token, $score);
-    }
+    $self->_run_script('train', scalar @keys, @keys, @argv);
 
     return $occurrences;
 }
