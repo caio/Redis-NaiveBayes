@@ -40,7 +40,7 @@ sub _debug {
 sub flush {
     my ($self) = @_;
 
-    foreach my $label ($self->_labels) {
+    for my $label ($self->_labels) {
         $self->_exec('del', $label);
     }
     $self->_exec('del', 'labels');
@@ -56,7 +56,7 @@ sub train {
     my $occurrences = $self->{tokenizer}->($item);
     die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
-    foreach my $token (keys %$occurrences) {
+    for my $token (keys %$occurrences) {
         my $score = $occurrences->{$token};
 
         $self->_exec('hincrby', $label, $token, $score);
@@ -74,7 +74,7 @@ sub untrain {
     my $occurrences = $self->{tokenizer}->($item);
     die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
-    foreach my $token (keys %$occurrences) {
+    for my $token (keys %$occurrences) {
         # Do nothing when we have no data for $token
         my $current = $self->_exec('hget', $label, $token);
         return unless $current;
