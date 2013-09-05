@@ -54,6 +54,45 @@ my $LUA_TRAIN = q{
     end
 };
 
+my $LUA_UNTRAIN = q{
+    -- KEYS:
+    --   1: LABELS set
+    --   2: label being updated
+    -- ARGV:
+    --   1: raw label name being untrained
+    --   2: number of tokens being updated
+    --   3-X: token being updated
+    --   X+1-N: value to increment corresponding token
+
+    local label      = KEYS[2]
+    local num_tokens = ARGV[2]
+
+    for index, token in ipairs(ARGV) do
+        if index > num_tokens + 2 then
+            break
+        end
+        if index > 2 then
+            local current = redis.call('hget', label, token);
+
+            if (current and current - ARGV[index + num_tokens] > 0) then
+                redis.call('hincrby', label, token, -1 * ARGV[index + num_tokens])
+            else
+                redis.call('hdel', label, token)
+            end
+        end
+    end
+
+    local total = 0
+    for index, value in ipairs(redis.call('hvals', label)) do
+        total = total + value
+    end
+
+    if total <= 0 then
+        redis.call('del', label)
+        redis.call('srem', KEYS[1], ARGV[1])
+    end
+};
+
 
 sub new {
     my ($class, %args) = @_;
@@ -76,6 +115,7 @@ sub _load_scripts {
 
     ($self->{scripts}->{flush}) = $self->{redis}->script_load($LUA_FLUSH);
     ($self->{scripts}->{train}) = $self->{redis}->script_load($LUA_TRAIN);
+    ($self->{scripts}->{untrain}) = $self->{redis}->script_load($LUA_UNTRAIN);
 }
 
 sub _exec {
@@ -124,7 +164,6 @@ sub train {
     return $occurrences;
 }
 
-# FIXME there are some obvious race conditions here if we're not using pipielines
 sub untrain {
     my ($self, $label, $item) = @_;
 
@@ -133,27 +172,12 @@ sub untrain {
     my $occurrences = $self->{tokenizer}->($item);
     die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
-    for my $token (keys %$occurrences) {
-        # Do nothing when we have no data for $token
-        my $current = $self->_exec('hget', $label, $token);
-        return unless $current;
+    my @keys = ($self->{namespace} . LABELS, $self->{namespace} . $label);
+    my @argv = ($label);
 
-        my $score = $occurrences->{$token};
+    push @argv, (scalar keys %$occurrences), keys %$occurrences, values %$occurrences;
 
-        if ($current - $score > 0) {
-            $self->_exec('hincrby', $label, $token, -1 * $score);
-        }
-        else {
-            $self->_exec('hdel', $label, $token);
-        }
-    }
-
-    # Delete label hash if its total score is zero/negative
-    my $total = sum($self->_exec('hvals', $label));
-    if (! $total or $total < 0) {
-        $self->_exec('del', $label);
-        $self->_exec('srem', LABELS, $label);
-    }
+    $self->_run_script('untrain', scalar @keys, @keys, @argv);
 
     return $occurrences;
 }
