@@ -54,6 +54,7 @@ sub train {
     $self->_exec('sadd', LABELS, $label);
 
     my $occurrences = $self->{tokenizer}->($item);
+    die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
     foreach my $token (keys %$occurrences) {
         my $score = $occurrences->{$token};
@@ -71,6 +72,7 @@ sub untrain {
     DEBUG and $self->_debug("UNtraining as '%s' the following: '%s'", $label, $item);
 
     my $occurrences = $self->{tokenizer}->($item);
+    die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
     foreach my $token (keys %$occurrences) {
         # Do nothing when we have no data for $token
