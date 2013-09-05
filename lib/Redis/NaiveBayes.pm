@@ -146,6 +146,13 @@ sub flush {
     $self->_run_script('flush', scalar @keys, map { $self->{namespace} . $_ } @keys);
 }
 
+sub _mrproper {
+    my ($self) = @_;
+
+    my @keys = $self->{redis}->keys($self->{namespace} . '*');
+    $self->{redis}->del(@keys) if @keys;
+}
+
 sub train {
     my ($self, $label, $item) = @_;
 
