@@ -12,6 +12,22 @@ use constant {
     LABELS => 'labels',
 };
 
+# Lua scripts
+my $LUA_FLUSH = q{
+    -- KEYS:
+    --   1: LABELS set
+    --   2-N: LABELS set contents
+
+    -- Delete all label stat hashes
+    for index, label in ipairs(KEYS) do
+        if index > 1 then
+            redis.call('del', label)
+        end
+    end
+
+    -- Delete the LABELS set
+    redis.call('del', KEYS[1]);
+};
 
 sub new {
     my ($class, %args) = @_;
@@ -22,7 +38,17 @@ sub new {
     $self->{namespace}  = $args{namespace}  or die "Missing namespace";
     $self->{tokenizer}  = $args{tokenizer}  or die "Missing tokenizer";
 
+    $self->_load_scripts;
+
     return $self;
+}
+
+sub _load_scripts {
+    my ($self) = @_;
+
+    $self->{scripts} = {};
+
+    ($self->{scripts}->{flush}) = $self->{redis}->script_load($LUA_FLUSH);
 }
 
 sub _exec {
@@ -37,13 +63,20 @@ sub _debug {
     printf STDERR @_;
 }
 
+sub _run_script {
+    my ($self, $script, $numkeys, @rest) = @_;
+
+    my $sha1 = $self->{scripts}->{$script} or die "Script wasn't loaded: '$script'";
+
+    $self->{redis}->evalsha($sha1, $numkeys, @rest);
+}
+
 sub flush {
     my ($self) = @_;
 
-    for my $label ($self->_labels) {
-        $self->_exec('del', $label);
-    }
-    $self->_exec('del', 'labels');
+    my @keys = (LABELS);
+    push @keys, ($self->_labels);
+    $self->_run_script('flush', scalar @keys, map { $self->{namespace} . $_ } @keys);
 }
 
 sub train {
