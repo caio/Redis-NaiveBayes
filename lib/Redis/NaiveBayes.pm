@@ -72,7 +72,8 @@ sub _labels {
 sub _priors {
     my ($self, $label) = @_;
 
-    return { $self->_exec('hgetall', $label) };
+    my %data = $self->_exec('hgetall', $label);
+    return { %data };
 }
 
 
