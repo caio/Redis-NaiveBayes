@@ -153,10 +153,8 @@ sub _mrproper {
     $self->{redis}->del(@keys) if @keys;
 }
 
-sub train {
-    my ($self, $label, $item) = @_;
-
-    DEBUG and $self->_debug("Training as '%s' the following: '%s'", $label, $item);
+sub _train {
+    my ($self, $label, $item, $script) = @_;
 
     my @keys = ($self->{namespace} . LABELS, $self->{namespace} . $label);
     my @argv = ($label);
@@ -166,27 +164,21 @@ sub train {
 
     push @argv, (scalar keys %$occurrences), keys %$occurrences, values %$occurrences;
 
-    $self->_run_script('train', scalar @keys, @keys, @argv);
+    $self->_run_script($script, scalar @keys, @keys, @argv);
 
     return $occurrences;
+}
+
+sub train {
+    my ($self, $label, $item) = @_;
+
+    return $self->_train($label, $item, 'train');
 }
 
 sub untrain {
     my ($self, $label, $item) = @_;
 
-    DEBUG and $self->_debug("UNtraining as '%s' the following: '%s'", $label, $item);
-
-    my $occurrences = $self->{tokenizer}->($item);
-    die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
-
-    my @keys = ($self->{namespace} . LABELS, $self->{namespace} . $label);
-    my @argv = ($label);
-
-    push @argv, (scalar keys %$occurrences), keys %$occurrences, values %$occurrences;
-
-    $self->_run_script('untrain', scalar @keys, @keys, @argv);
-
-    return $occurrences;
+    return $self->_train($label, $item, 'untrain');
 }
 
 sub _labels {
