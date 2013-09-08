@@ -1,5 +1,5 @@
 package Redis::NaiveBayes;
-# ABSTRACT: A performance-freak Redis-backed NaiveBayes implementation
+# ABSTRACT: A generic Redis-backed NaiveBayes implementation
 
 use strict;
 use warnings;

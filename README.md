@@ -1,6 +1,6 @@
 # NAME
 
-Redis::NaiveBayes - A performance-freak Redis-backed NaiveBayes implementation
+Redis::NaiveBayes - A generic Redis-backed NaiveBayes implementation
 
 # VERSION
 
