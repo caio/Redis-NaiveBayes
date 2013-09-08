@@ -1,1 +1,3 @@
 .build/*
+Redis-NaiveBayes-*/
+Redis-NaiveBayes-*.tar.gz
