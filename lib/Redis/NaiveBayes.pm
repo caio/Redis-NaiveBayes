@@ -3,7 +3,7 @@ package Redis::NaiveBayes;
 
 use strict;
 use warnings;
-use List::Util qw(sum);
+use List::Util qw(sum reduce);
 
 use Redis;
 
@@ -236,6 +236,16 @@ sub untrain {
     my ($self, $label, $item) = @_;
 
     return $self->_train($label, $item, 'untrain');
+}
+
+sub classify {
+    my ($self, $item) = @_;
+
+    my $scores = $self->scores($item);
+
+    my $best_label = reduce { $scores->{$a} > $scores->{$b} ? $a : $b } keys %$scores;
+
+    return $best_label;
 }
 
 sub scores {
