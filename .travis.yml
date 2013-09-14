@@ -10,7 +10,7 @@ perl:
   - "5.10"
 
 install:
-  - cpanm Redis
+  - cpanm -n Redis
 
 script:
   - perl -MExtUtils::Command::MM -Ilib -e test_harness t/*.t
