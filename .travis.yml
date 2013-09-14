@@ -1,12 +1,5 @@
 language: perl
 
-notifications:
-  recipients:
-    - cpan@caioromao.com
-  email:
-    on_success: change
-    on_failure: always
-
 services:
   - redis-server
 
