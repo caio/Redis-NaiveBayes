@@ -1,0 +1,23 @@
+language: perl
+
+notifications:
+  recipients:
+    - cpan@caioromao.com
+  email:
+    on_success: change
+    on_failure: always
+
+services:
+  - redis-server
+
+perl:
+  - "5.16"
+  - "5.14"
+  - "5.12"
+  - "5.10"
+
+install:
+  - cpanm Redis
+
+script:
+  - perl -MExtUtils::Command::MM -Ilib -e test_harness t/*.t
