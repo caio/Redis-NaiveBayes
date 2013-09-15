@@ -62,20 +62,19 @@ my $LUA_FLUSH_FMT = q{
     redis.call('del', labels_key);
 };
 
-my $LUA_TRAIN = q{
-    -- KEYS:
-    --   1: LABELS set
-    --   2: label being updated
+my $LUA_TRAIN_FMT = q{
     -- ARGV:
     --   1: raw label name being trained
     --   2: number of tokens being updated
     --   3-X: token being updated
     --   X+1-N: value to increment corresponding token
 
-    redis.call('sadd', KEYS[1], ARGV[1])
-
-    local label      = KEYS[2]
+    local namespace  = '%s'
+    local labels_key = namespace .. '%s'
+    local label      = namespace .. ARGV[1]
     local num_tokens = ARGV[2]
+
+    redis.call('sadd', labels_key, ARGV[1])
 
     for index, token in ipairs(ARGV) do
         if index > num_tokens + 2 then
@@ -87,17 +86,16 @@ my $LUA_TRAIN = q{
     end
 };
 
-my $LUA_UNTRAIN = q{
-    -- KEYS:
-    --   1: LABELS set
-    --   2: label being updated
+my $LUA_UNTRAIN_FMT = q{
     -- ARGV:
     --   1: raw label name being untrained
     --   2: number of tokens being updated
     --   3-X: token being updated
     --   X+1-N: value to increment corresponding token
 
-    local label      = KEYS[2]
+    local namespace  = '%s'
+    local labels_key = namespace .. '%s'
+    local label      = namespace .. ARGV[1]
     local num_tokens = ARGV[2]
 
     for index, token in ipairs(ARGV) do
@@ -116,13 +114,13 @@ my $LUA_UNTRAIN = q{
     end
 
     local total = 0
-    for index, value in ipairs(redis.call('hvals', label)) do
+    for _, value in ipairs(redis.call('hvals', label)) do
         total = total + value
     end
 
     if total <= 0 then
         redis.call('del', label)
-        redis.call('srem', KEYS[1], ARGV[1])
+        redis.call('srem', labels_key, ARGV[1])
     end
 };
 
@@ -228,8 +226,8 @@ sub _load_scripts {
     $self->{scripts} = {};
 
     $self->{scripts}->{flush} = $self->_redis_script_load($LUA_FLUSH_FMT, ($self->{namespace}, LABELS));
-    ($self->{scripts}->{train}) = $self->{redis}->script_load($LUA_TRAIN);
-    ($self->{scripts}->{untrain}) = $self->{redis}->script_load($LUA_UNTRAIN);
+    $self->{scripts}->{train} = $self->_redis_script_load($LUA_TRAIN_FMT, ($self->{namespace}, LABELS));
+    $self->{scripts}->{untrain} = $self->_redis_script_load($LUA_UNTRAIN_FMT, ($self->{namespace}, LABELS));
     ($self->{scripts}->{scores}) = $self->{redis}->script_load($LUA_SCORES);
 }
 
@@ -281,15 +279,12 @@ sub _mrproper {
 sub _train {
     my ($self, $label, $item, $script) = @_;
 
-    my @keys = ($self->{namespace} . LABELS, $self->{namespace} . $label);
-    my @argv = ($label);
-
     my $occurrences = $self->{tokenizer}->($item);
     die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
-    push @argv, (scalar keys %$occurrences), keys %$occurrences, values %$occurrences;
+    my @argv = ($label, (scalar keys %$occurrences), keys %$occurrences, values %$occurrences);
 
-    $self->_run_script($script, scalar @keys, @keys, @argv);
+    $self->_run_script($script, 0, @argv);
 
     return $occurrences;
 }
