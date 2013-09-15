@@ -178,11 +178,9 @@ my $LUA_SCORES = q{
     -- this is so fucking retarded. I now regret this luascript branch idea
     local return_crap = {};
     local index = 1
-    for _, label in ipairs(KEYS) do
-        if scores[label] then
-            return_crap[index] = label
-            return_crap[index+1] = scores[label]
-        end
+    for key, value in pairs(scores) do
+        return_crap[index] = key
+        return_crap[index+1] = value
         index = index + 2
     end
 
