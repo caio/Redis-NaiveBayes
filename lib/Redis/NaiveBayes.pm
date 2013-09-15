@@ -124,7 +124,7 @@ my $LUA_UNTRAIN_FMT = q{
     end
 };
 
-my $LUA_SCORES_FMT = q{
+my $_LUA_CALCULATE_SCORES = q{
     -- ARGV
     --   1: correction
     --   2: number of tokens
@@ -155,7 +155,7 @@ my $LUA_SCORES_FMT = q{
                 end
 
                 if idx > 2 then
-                    local score = redis.call('hget', label, token);
+                    local score = redis.call('hget', label, token)
 
                     if (not score or score == 0) then
                         score = correction
@@ -166,8 +166,12 @@ my $LUA_SCORES_FMT = q{
             end
         end
     end
+};
 
-    local return_crap = {};
+my $LUA_SCORES_FMT = qq{
+    $_LUA_CALCULATE_SCORES
+
+    local return_crap = {}
     local index = 1
     for key, value in pairs(scores) do
         return_crap[index] = key
@@ -176,6 +180,21 @@ my $LUA_SCORES_FMT = q{
     end
 
     return return_crap;
+};
+
+my $LUA_CLASSIFY_FMT = qq{
+    $_LUA_CALCULATE_SCORES
+
+    local best_label = nil
+    local best_score = nil
+    for label, score in pairs(scores) do
+        if (best_score == nil or best_score < score) then
+            best_label = label
+            best_score = score
+        end
+    end
+
+    return best_label
 };
 
 =method new
@@ -229,6 +248,7 @@ sub _load_scripts {
     $self->{scripts}->{train} = $self->_redis_script_load($LUA_TRAIN_FMT);
     $self->{scripts}->{untrain} = $self->_redis_script_load($LUA_UNTRAIN_FMT);
     $self->{scripts}->{scores} = $self->_redis_script_load($LUA_SCORES_FMT);
+    $self->{scripts}->{classify} = $self->_redis_script_load($LUA_CLASSIFY_FMT);
 }
 
 sub _exec {
@@ -331,9 +351,12 @@ Gets the most probable category the provided item in is.
 sub classify {
     my ($self, $item) = @_;
 
-    my $scores = $self->scores($item);
+    my $occurrences = $self->{tokenizer}->($item);
+    die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
-    my $best_label = reduce { $scores->{$a} > $scores->{$b} ? $a : $b } keys %$scores;
+    my @argv = ($self->{correction}, scalar keys %$occurrences, keys %$occurrences, values %$occurrences);
+
+    my $best_label = $self->_run_script('classify', 0, @argv);
 
     return $best_label;
 }
