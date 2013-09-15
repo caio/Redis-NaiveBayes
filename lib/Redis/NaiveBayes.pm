@@ -215,7 +215,7 @@ sub new {
 sub _redis_script_load {
     my ($self, $script_fmt, @args) = @_;
 
-    my ($sha1) = $self->{redis}->script_load(sprintf($script_fmt, @args));
+    my ($sha1) = $self->{redis}->script_load(sprintf($script_fmt, $self->{namespace}, LABELS, @args));
 
     return $sha1;
 }
@@ -225,9 +225,9 @@ sub _load_scripts {
 
     $self->{scripts} = {};
 
-    $self->{scripts}->{flush} = $self->_redis_script_load($LUA_FLUSH_FMT, ($self->{namespace}, LABELS));
-    $self->{scripts}->{train} = $self->_redis_script_load($LUA_TRAIN_FMT, ($self->{namespace}, LABELS));
-    $self->{scripts}->{untrain} = $self->_redis_script_load($LUA_UNTRAIN_FMT, ($self->{namespace}, LABELS));
+    $self->{scripts}->{flush} = $self->_redis_script_load($LUA_FLUSH_FMT);
+    $self->{scripts}->{train} = $self->_redis_script_load($LUA_TRAIN_FMT);
+    $self->{scripts}->{untrain} = $self->_redis_script_load($LUA_UNTRAIN_FMT);
     ($self->{scripts}->{scores}) = $self->{redis}->script_load($LUA_SCORES);
 }
 
