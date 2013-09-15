@@ -53,20 +53,13 @@ use constant {
 };
 
 # Lua scripts
-my $LUA_FLUSH = q{
-    -- KEYS:
-    --   1: LABELS set
-    --   2-N: LABELS set contents
-
-    -- Delete all label stat hashes
-    for index, label in ipairs(KEYS) do
-        if index > 1 then
-            redis.call('del', label)
-        end
+my $LUA_FLUSH_FMT = q{
+    local namespace  = '%s'
+    local labels_key = namespace .. '%s'
+    for _, member in ipairs(redis.call('smembers', labels_key)) do
+        redis.call('del', namespace .. member)
     end
-
-    -- Delete the LABELS set
-    redis.call('del', KEYS[1]);
+    redis.call('del', labels_key);
 };
 
 my $LUA_TRAIN = q{
@@ -221,12 +214,20 @@ sub new {
     return $self;
 }
 
+sub _redis_script_load {
+    my ($self, $script_fmt, @args) = @_;
+
+    my ($sha1) = $self->{redis}->script_load(sprintf($script_fmt, @args));
+
+    return $sha1;
+}
+
 sub _load_scripts {
     my ($self) = @_;
 
     $self->{scripts} = {};
 
-    ($self->{scripts}->{flush}) = $self->{redis}->script_load($LUA_FLUSH);
+    $self->{scripts}->{flush} = $self->_redis_script_load($LUA_FLUSH_FMT, ($self->{namespace}, LABELS));
     ($self->{scripts}->{train}) = $self->{redis}->script_load($LUA_TRAIN);
     ($self->{scripts}->{untrain}) = $self->{redis}->script_load($LUA_UNTRAIN);
     ($self->{scripts}->{scores}) = $self->{redis}->script_load($LUA_SCORES);
@@ -247,6 +248,7 @@ sub _debug {
 sub _run_script {
     my ($self, $script, $numkeys, @rest) = @_;
 
+    $numkeys ||= 0;
     my $sha1 = $self->{scripts}->{$script} or die "Script wasn't loaded: '$script'";
 
     $self->{redis}->evalsha($sha1, $numkeys, @rest);
@@ -266,9 +268,7 @@ keys that match C<namespace*>.
 sub flush {
     my ($self) = @_;
 
-    my @keys = (LABELS);
-    push @keys, ($self->_labels);
-    $self->_run_script('flush', scalar @keys, map { $self->{namespace} . $_ } @keys);
+    $self->_run_script('flush');
 }
 
 sub _mrproper {
