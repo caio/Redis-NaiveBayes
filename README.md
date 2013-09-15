@@ -94,7 +94,13 @@ Returns a HASHREF with the scores for each of the labels known by the model
 
 This module is heavilly inspired by the Python implementation
 available at https://github.com/jart/redisbayes - the main
-difference, besides the obvious
+difference, besides the obvious language choice, is that
+Redis::NaiveBayes focuses on being generic and minimizing
+the number of roundtrips to Redis.
+
+# TODO
+
+- Add support for additive smoothing
 
 # SEE ALSO
 

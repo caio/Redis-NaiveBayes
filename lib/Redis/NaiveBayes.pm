@@ -33,7 +33,17 @@ nor filtering out of the box.
 
 This module is heavilly inspired by the Python implementation
 available at https://github.com/jart/redisbayes - the main
-difference, besides the obvious
+difference, besides the obvious language choice, is that
+Redis::NaiveBayes focuses on being generic and minimizing
+the number of roundtrips to Redis.
+
+=head1 TODO
+
+=over
+
+=item Add support for additive smoothing
+
+=back
 
 =head1 SEE ALSO
 
