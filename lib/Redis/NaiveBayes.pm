@@ -58,7 +58,6 @@ use List::Util qw(sum reduce);
 use Redis;
 
 use constant {
-    DEBUG => 0,
     LABELS => 'labels',
 };
 
@@ -264,13 +263,7 @@ sub _load_scripts {
 sub _exec {
     my ($self, $command, $key, @rest) = @_;
 
-    DEBUG and $self->_debug("Will execute command '%s' on '%s'", ($command, $self->{namespace} . $key));
     return $self->{redis}->$command($self->{namespace} . $key, @rest);
-}
-
-sub _debug {
-    my $self = shift;
-    printf STDERR @_;
 }
 
 sub _run_script {
