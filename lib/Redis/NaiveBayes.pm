@@ -124,29 +124,30 @@ my $LUA_UNTRAIN_FMT = q{
     end
 };
 
-my $LUA_SCORES = q{
-    -- KEYS
-    --   1-N: all possible labels
+my $LUA_SCORES_FMT = q{
     -- ARGV
     --   1: correction
     --   2: number of tokens
     --   3-X: tokens
     --   X+1-N: values for each token
-    -- FIXME: Maybe I shouldn't care about redis-cluster?
     -- FIXME: I'm ignoring the scores per token on purpose for now
 
-    local scores = {}
+    local namespace  = '%s'
+    local labels_key = namespace .. '%s'
     local correction = ARGV[1]
     local num_tokens = ARGV[2]
 
-    for index, label in ipairs(KEYS) do
+    local scores = {}
+
+    for index, raw_label in ipairs(redis.call('smembers', labels_key)) do
+        local label = namespace .. raw_label
         local tally = 0
         for _, value in ipairs(redis.call('hvals', label)) do
             tally = tally + value
         end
 
         if tally > 0 then
-            scores[label] = 0.0
+            scores[raw_label] = 0.0
 
             for idx, token in ipairs(ARGV) do
                 if idx > num_tokens + 2 then
@@ -160,13 +161,12 @@ my $LUA_SCORES = q{
                         score = correction
                     end
 
-                    scores[label] = scores[label] + math.log(score / tally)
+                    scores[raw_label] = scores[raw_label] + math.log(score / tally)
                 end
             end
         end
     end
 
-    -- this is so fucking retarded. I now regret this luascript branch idea
     local return_crap = {};
     local index = 1
     for key, value in pairs(scores) do
@@ -228,7 +228,7 @@ sub _load_scripts {
     $self->{scripts}->{flush} = $self->_redis_script_load($LUA_FLUSH_FMT);
     $self->{scripts}->{train} = $self->_redis_script_load($LUA_TRAIN_FMT);
     $self->{scripts}->{untrain} = $self->_redis_script_load($LUA_UNTRAIN_FMT);
-    ($self->{scripts}->{scores}) = $self->{redis}->script_load($LUA_SCORES);
+    $self->{scripts}->{scores} = $self->_redis_script_load($LUA_SCORES_FMT);
 }
 
 sub _exec {
@@ -352,12 +352,11 @@ sub scores {
     my $occurrences = $self->{tokenizer}->($item);
     die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
-    my @labels = map { $self->{namespace} . $_ } ($self->_labels);
     my @argv = ($self->{correction}, scalar keys %$occurrences, keys %$occurrences, values %$occurrences);
 
-    my %scores = $self->_run_script('scores', scalar @labels, @labels, @argv);
+    my %scores = $self->_run_script('scores', 0, @argv);
 
-    return { map { substr($_, length($self->{namespace})) => $scores{$_} } keys %scores };
+    return \%scores;
 }
 
 sub _labels {
