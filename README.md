@@ -4,7 +4,7 @@ Redis::NaiveBayes - A generic Redis-backed NaiveBayes implementation
 
 # VERSION
 
-version 0.0.2
+version 0.0.3
 
 # SYNOPSIS
 

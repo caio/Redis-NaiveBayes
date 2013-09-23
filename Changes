@@ -1,5 +1,10 @@
 {{$NEXT}}
 
+0.0.3   2013-09-23
+        - Big performance improvements by caching the tally per label
+        - Drop support for redis-cluster
+        - Simple documentation fixes
+
 0.0.2   2013-09-15
         - Add missing bits of documentation
 
