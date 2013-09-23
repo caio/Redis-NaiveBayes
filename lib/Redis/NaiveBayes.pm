@@ -67,6 +67,7 @@ my $LUA_FLUSH_FMT = q{
     local labels_key = namespace .. '%s'
     for _, member in ipairs(redis.call('smembers', labels_key)) do
         redis.call('del', namespace .. member)
+        redis.call('del', namespace .. 'tally_for:' .. member)
     end
     redis.call('del', labels_key);
 };
@@ -81,7 +82,9 @@ my $LUA_TRAIN_FMT = q{
     local namespace  = '%s'
     local labels_key = namespace .. '%s'
     local label      = namespace .. ARGV[1]
+    local tally_key  = namespace .. 'tally_for:' .. ARGV[1]
     local num_tokens = ARGV[2]
+    local tot_added  = 0
 
     redis.call('sadd', labels_key, ARGV[1])
 
@@ -91,8 +94,16 @@ my $LUA_TRAIN_FMT = q{
         end
         if index > 2 then
             redis.call('hincrby', label, token, ARGV[index + num_tokens])
+            tot_added = tot_added + ARGV[index + num_tokens]
         end
     end
+
+    local old_tally = redis.call('get', tally_key);
+    if (not old_tally) then
+        old_tally = 0
+    end
+
+    redis.call('set', tally_key, old_tally + tot_added)
 };
 
 my $LUA_UNTRAIN_FMT = q{
@@ -105,6 +116,7 @@ my $LUA_UNTRAIN_FMT = q{
     local namespace  = '%s'
     local labels_key = namespace .. '%s'
     local label      = namespace .. ARGV[1]
+    local tally_key  = namespace .. 'tally_for:' .. ARGV[1]
     local num_tokens = ARGV[2]
 
     for index, token in ipairs(ARGV) do
@@ -122,14 +134,17 @@ my $LUA_UNTRAIN_FMT = q{
         end
     end
 
-    local total = 0
+    local tally = 0
     for _, value in ipairs(redis.call('hvals', label)) do
-        total = total + value
+        tally = tally + value
     end
 
-    if total <= 0 then
+    if tally <= 0 then
         redis.call('del', label)
         redis.call('srem', labels_key, ARGV[1])
+        redis.call('del', tally_key)
+    else
+        redis.call('set', tally_key, tally)
     end
 };
 
@@ -150,12 +165,10 @@ my $_LUA_CALCULATE_SCORES = q{
 
     for index, raw_label in ipairs(redis.call('smembers', labels_key)) do
         local label = namespace .. raw_label
-        local tally = 0
-        for _, value in ipairs(redis.call('hvals', label)) do
-            tally = tally + value
-        end
 
-        if tally > 0 then
+        local tally = tonumber(redis.call('get', namespace .. 'tally_for:' .. raw_label))
+
+        if (tally and tally > 0) then
             scores[raw_label] = 0.0
 
             for idx, token in ipairs(ARGV) do
