@@ -62,36 +62,31 @@ use constant {
 };
 
 # Lua scripts
-my $LUA_FLUSH = q{
-    -- KEYS:
-    --   1: LABELS set
-    --   2-N: LABELS set contents
-
-    -- Delete all label stat hashes
-    for index, label in ipairs(KEYS) do
-        if index > 1 then
-            redis.call('del', label)
-        end
+my $LUA_FLUSH_FMT = q{
+    local namespace  = '%s'
+    local labels_key = namespace .. '%s'
+    for _, member in ipairs(redis.call('smembers', labels_key)) do
+        redis.call('del', namespace .. member)
+        redis.call('del', namespace .. 'tally_for:' .. member)
     end
-
-    -- Delete the LABELS set
-    redis.call('del', KEYS[1]);
+    redis.call('del', labels_key);
 };
 
-my $LUA_TRAIN = q{
-    -- KEYS:
-    --   1: LABELS set
-    --   2: label being updated
+my $LUA_TRAIN_FMT = q{
     -- ARGV:
     --   1: raw label name being trained
     --   2: number of tokens being updated
     --   3-X: token being updated
     --   X+1-N: value to increment corresponding token
 
-    redis.call('sadd', KEYS[1], ARGV[1])
-
-    local label      = KEYS[2]
+    local namespace  = '%s'
+    local labels_key = namespace .. '%s'
+    local label      = namespace .. ARGV[1]
+    local tally_key  = namespace .. 'tally_for:' .. ARGV[1]
     local num_tokens = ARGV[2]
+    local tot_added  = 0
+
+    redis.call('sadd', labels_key, ARGV[1])
 
     for index, token in ipairs(ARGV) do
         if index > num_tokens + 2 then
@@ -99,21 +94,29 @@ my $LUA_TRAIN = q{
         end
         if index > 2 then
             redis.call('hincrby', label, token, ARGV[index + num_tokens])
+            tot_added = tot_added + ARGV[index + num_tokens]
         end
     end
+
+    local old_tally = redis.call('get', tally_key);
+    if (not old_tally) then
+        old_tally = 0
+    end
+
+    redis.call('set', tally_key, old_tally + tot_added)
 };
 
-my $LUA_UNTRAIN = q{
-    -- KEYS:
-    --   1: LABELS set
-    --   2: label being updated
+my $LUA_UNTRAIN_FMT = q{
     -- ARGV:
     --   1: raw label name being untrained
     --   2: number of tokens being updated
     --   3-X: token being updated
     --   X+1-N: value to increment corresponding token
 
-    local label      = KEYS[2]
+    local namespace  = '%s'
+    local labels_key = namespace .. '%s'
+    local label      = namespace .. ARGV[1]
+    local tally_key  = namespace .. 'tally_for:' .. ARGV[1]
     local num_tokens = ARGV[2]
 
     for index, token in ipairs(ARGV) do
@@ -131,40 +134,42 @@ my $LUA_UNTRAIN = q{
         end
     end
 
-    local total = 0
-    for index, value in ipairs(redis.call('hvals', label)) do
-        total = total + value
+    local tally = 0
+    for _, value in ipairs(redis.call('hvals', label)) do
+        tally = tally + value
     end
 
-    if total <= 0 then
+    if tally <= 0 then
         redis.call('del', label)
-        redis.call('srem', KEYS[1], ARGV[1])
+        redis.call('srem', labels_key, ARGV[1])
+        redis.call('del', tally_key)
+    else
+        redis.call('set', tally_key, tally)
     end
 };
 
-my $LUA_SCORES = q{
-    -- KEYS
-    --   1-N: all possible labels
+my $_LUA_CALCULATE_SCORES = q{
     -- ARGV
     --   1: correction
     --   2: number of tokens
     --   3-X: tokens
     --   X+1-N: values for each token
-    -- FIXME: Maybe I shouldn't care about redis-cluster?
     -- FIXME: I'm ignoring the scores per token on purpose for now
 
-    local scores = {}
+    local namespace  = '%s'
+    local labels_key = namespace .. '%s'
     local correction = ARGV[1]
     local num_tokens = ARGV[2]
 
-    for index, label in ipairs(KEYS) do
-        local tally = 0
-        for _, value in ipairs(redis.call('hvals', label)) do
-            tally = tally + value
-        end
+    local scores = {}
 
-        if tally > 0 then
-            scores[label] = 0.0
+    for index, raw_label in ipairs(redis.call('smembers', labels_key)) do
+        local label = namespace .. raw_label
+
+        local tally = tonumber(redis.call('get', namespace .. 'tally_for:' .. raw_label))
+
+        if (tally and tally > 0) then
+            scores[raw_label] = 0.0
 
             for idx, token in ipairs(ARGV) do
                 if idx > num_tokens + 2 then
@@ -172,20 +177,23 @@ my $LUA_SCORES = q{
                 end
 
                 if idx > 2 then
-                    local score = redis.call('hget', label, token);
+                    local score = redis.call('hget', label, token)
 
                     if (not score or score == 0) then
                         score = correction
                     end
 
-                    scores[label] = scores[label] + math.log(score / tally)
+                    scores[raw_label] = scores[raw_label] + math.log(score / tally)
                 end
             end
         end
     end
+};
 
-    -- this is so fucking retarded. I now regret this luascript branch idea
-    local return_crap = {};
+my $LUA_SCORES_FMT = qq{
+    $_LUA_CALCULATE_SCORES
+
+    local return_crap = {}
     local index = 1
     for key, value in pairs(scores) do
         return_crap[index] = key
@@ -194,6 +202,21 @@ my $LUA_SCORES = q{
     end
 
     return return_crap;
+};
+
+my $LUA_CLASSIFY_FMT = qq{
+    $_LUA_CALCULATE_SCORES
+
+    local best_label = nil
+    local best_score = nil
+    for label, score in pairs(scores) do
+        if (best_score == nil or best_score < score) then
+            best_label = label
+            best_score = score
+        end
+    end
+
+    return best_label
 };
 
 =method new
@@ -230,15 +253,24 @@ sub new {
     return $self;
 }
 
+sub _redis_script_load {
+    my ($self, $script_fmt, @args) = @_;
+
+    my ($sha1) = $self->{redis}->script_load(sprintf($script_fmt, $self->{namespace}, LABELS, @args));
+
+    return $sha1;
+}
+
 sub _load_scripts {
     my ($self) = @_;
 
     $self->{scripts} = {};
 
-    ($self->{scripts}->{flush}) = $self->{redis}->script_load($LUA_FLUSH);
-    ($self->{scripts}->{train}) = $self->{redis}->script_load($LUA_TRAIN);
-    ($self->{scripts}->{untrain}) = $self->{redis}->script_load($LUA_UNTRAIN);
-    ($self->{scripts}->{scores}) = $self->{redis}->script_load($LUA_SCORES);
+    $self->{scripts}->{flush} = $self->_redis_script_load($LUA_FLUSH_FMT);
+    $self->{scripts}->{train} = $self->_redis_script_load($LUA_TRAIN_FMT);
+    $self->{scripts}->{untrain} = $self->_redis_script_load($LUA_UNTRAIN_FMT);
+    $self->{scripts}->{scores} = $self->_redis_script_load($LUA_SCORES_FMT);
+    $self->{scripts}->{classify} = $self->_redis_script_load($LUA_CLASSIFY_FMT);
 }
 
 sub _exec {
@@ -250,6 +282,7 @@ sub _exec {
 sub _run_script {
     my ($self, $script, $numkeys, @rest) = @_;
 
+    $numkeys ||= 0;
     my $sha1 = $self->{scripts}->{$script} or die "Script wasn't loaded: '$script'";
 
     $self->{redis}->evalsha($sha1, $numkeys, @rest);
@@ -269,9 +302,7 @@ keys that match C<namespace*>.
 sub flush {
     my ($self) = @_;
 
-    my @keys = (LABELS);
-    push @keys, ($self->_labels);
-    $self->_run_script('flush', scalar @keys, map { $self->{namespace} . $_ } @keys);
+    $self->_run_script('flush');
 }
 
 sub _mrproper {
@@ -284,15 +315,12 @@ sub _mrproper {
 sub _train {
     my ($self, $label, $item, $script) = @_;
 
-    my @keys = ($self->{namespace} . LABELS, $self->{namespace} . $label);
-    my @argv = ($label);
-
     my $occurrences = $self->{tokenizer}->($item);
     die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
-    push @argv, (scalar keys %$occurrences), keys %$occurrences, values %$occurrences;
+    my @argv = ($label, (scalar keys %$occurrences), keys %$occurrences, values %$occurrences);
 
-    $self->_run_script($script, scalar @keys, @keys, @argv);
+    $self->_run_script($script, 0, @argv);
 
     return $occurrences;
 }
@@ -339,9 +367,12 @@ Gets the most probable category the provided item in is.
 sub classify {
     my ($self, $item) = @_;
 
-    my $scores = $self->scores($item);
+    my $occurrences = $self->{tokenizer}->($item);
+    die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
-    my $best_label = reduce { $scores->{$a} > $scores->{$b} ? $a : $b } keys %$scores;
+    my @argv = ($self->{correction}, scalar keys %$occurrences, keys %$occurrences, values %$occurrences);
+
+    my $best_label = $self->_run_script('classify', 0, @argv);
 
     return $best_label;
 }
@@ -360,12 +391,11 @@ sub scores {
     my $occurrences = $self->{tokenizer}->($item);
     die "tokenizer() didn't return a HASHREF" unless ref $occurrences eq 'HASH';
 
-    my @labels = map { $self->{namespace} . $_ } ($self->_labels);
     my @argv = ($self->{correction}, scalar keys %$occurrences, keys %$occurrences, values %$occurrences);
 
-    my %scores = $self->_run_script('scores', scalar @labels, @labels, @argv);
+    my %scores = $self->_run_script('scores', 0, @argv);
 
-    return { map { substr($_, length($self->{namespace})) => $scores{$_} } keys %scores };
+    return \%scores;
 }
 
 sub _labels {
