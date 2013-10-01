@@ -48,6 +48,7 @@ if ($fast) {
 }
 
 my $bayes = Redis::NaiveBayes->new(
+    correction  => 1.18e-38,
     namespace   => $namespace . ':',
     tokenizer   => $tokenizer,
 );
