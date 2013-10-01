@@ -3,3 +3,4 @@ Redis-NaiveBayes-*/
 Redis-NaiveBayes-*.tar.gz
 eg/20news-bydate-test/*
 eg/20news-bydate-train/*
+eg/20news-bydate.tar.gz
