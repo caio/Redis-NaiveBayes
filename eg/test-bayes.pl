@@ -26,8 +26,8 @@ pod2usage(-verbose => 99)
     if $help
     or not $data;
 
-$namespace  //= 'newsgroups';
-srand($seed // 42);
+$namespace  ||= 'newsgroups';
+srand($seed || 42);
 
 my %stopwords;
 if ($precise) {
@@ -114,7 +114,7 @@ sub matrix {
     for my $x (@categs) {
         my $sum = 0;
         for my $y (@categs) {
-            my $score = $confusion->{$x}{$y} // 0;
+            my $score = $confusion->{$x}{$y} || 0;
             printf '%5d', $score;
             $sum += $score;
         }
