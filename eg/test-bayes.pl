@@ -36,15 +36,18 @@ if ($precise) {
     %stopwords = %{ Lingua::StopWords::getStopWords('en') };
 }
 
-my $tokenizer = \&tokenizer;
+my $tokenizer = \&tokenizer_regex;
+my $sfx;
 if ($fast) {
-    die "Can't be both fast and precise (yet)\n"
-        if $precise;
-
     require Text::SpeedyFx;
-    my $sfx = Text::SpeedyFx->new($seed, 8);
+    $sfx = Text::SpeedyFx->new($seed, 8);
 
-    $tokenizer = sub { $sfx->hash($_[0]) };
+    if ($precise) {
+        %stopwords = %{ $sfx->hash(join(' ', keys %stopwords)) };
+        $tokenizer = \&tokenizer_speedyfx;
+    } else {
+        $tokenizer = sub { $sfx->hash($_[0]) };
+    }
 }
 
 my $bayes = Redis::NaiveBayes->new(
@@ -126,13 +129,25 @@ sub matrix {
     return;
 }
 
-sub tokenizer {
+sub tokenizer_regex {
     my ($input) = @_;
     my %occurs;
     while ($input =~ m{(\w{3,})}gsx) {
         my $token = lc $1;
         ++$occurs{$token}
             unless exists $stopwords{$token};
+    }
+    return \%occurs;
+}
+
+# slower than bare Text::SpeedyFx, but supports stopwords
+sub tokenizer_speedyfx {
+    my ($input) = @_;
+    my $occurs = $sfx->hash($input);
+    my %occurs;
+    while (my ($key, $val) = each %{$occurs}) {
+        $occurs{$key} = $val
+            unless exists $stopwords{$key};
     }
     return \%occurs;
 }
@@ -199,7 +214,6 @@ This is the only required parameter.
 =item C<--fast>
 
 Use L<Text::SpeedyFx> to get faster tokenization.
-(can't be used in conjunction with C<--precise>)
 
 =item C<--maxsize=KILOBYTES>
 
@@ -214,7 +228,6 @@ Default: C<newsgroups>
 =item C<--precise>
 
 Use L<Lingua::StopWords> to get more precise tokenization.
-(can't be used in conjunction with C<--fast>)
 
 =item C<--seed=INTEGER>
 
