@@ -15,6 +15,7 @@ use Redis::NaiveBayes;
 GetOptions(
     'data=s'        => \my $data,
     'help'          => \my $help,
+    'fast'          => \my $fast,
     'maxsize=i'     => \my $maxsize,
     'namespace=s'   => \my $namespace,
     'precise'       => \my $precise,
@@ -27,7 +28,7 @@ pod2usage(-verbose => 99)
     or not $data;
 
 $namespace  ||= 'newsgroups';
-srand($seed || 42);
+srand($seed ||= 42);
 
 my %stopwords;
 if ($precise) {
@@ -35,16 +36,16 @@ if ($precise) {
     %stopwords = %{ Lingua::StopWords::getStopWords('en') };
 }
 
-my $tokenizer = sub {
-    my ($input) = @_;
-    my %occurs;
-    while ($input =~ m{(\w{3,})}gsx) {
-        my $token = lc $1;
-        ++$occurs{$token}
-            unless exists $stopwords{$token};
-    }
-    return \%occurs;
-};
+my $tokenizer = \&tokenizer;
+if ($fast) {
+    die "Can't be both fast and precise (yet)\n"
+        if $precise;
+
+    require Text::SpeedyFx;
+    my $sfx = Text::SpeedyFx->new($seed, 8);
+
+    $tokenizer = sub { $sfx->hash($_[0]) };
+}
 
 my $bayes = Redis::NaiveBayes->new(
     namespace   => $namespace . ':',
@@ -124,6 +125,17 @@ sub matrix {
     return;
 }
 
+sub tokenizer {
+    my ($input) = @_;
+    my %occurs;
+    while ($input =~ m{(\w{3,})}gsx) {
+        my $token = lc $1;
+        ++$occurs{$token}
+            unless exists $stopwords{$token};
+    }
+    return \%occurs;
+}
+
 __DATA__
 =pod
 
@@ -183,6 +195,11 @@ This.
 Directory with the dataset.
 This is the only required parameter.
 
+=item C<--fast>
+
+Use L<Text::SpeedyFx> to get faster tokenization.
+(can't be used in conjunction with C<--precise>)
+
 =item C<--maxsize=KILOBYTES>
 
 Randomly pick up to this size of data from the dataset directory.
@@ -195,7 +212,8 @@ Default: C<newsgroups>
 
 =item C<--precise>
 
-Use L<Lingua::StopWords> to get more precision.
+Use L<Lingua::StopWords> to get more precise tokenization.
+(can't be used in conjunction with C<--fast>)
 
 =item C<--seed=INTEGER>
 
