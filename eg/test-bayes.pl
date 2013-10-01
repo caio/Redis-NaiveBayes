@@ -17,6 +17,7 @@ GetOptions(
     'help'          => \my $help,
     'maxsize=i'     => \my $maxsize,
     'namespace=s'   => \my $namespace,
+    'precise'       => \my $precise,
     'seed=i'        => \my $seed,
     'trace'         => \my $trace,
     'train'         => \my $train,
@@ -28,21 +29,32 @@ pod2usage(-verbose => 99)
 $namespace  //= 'newsgroups';
 srand($seed // 42);
 
+my %stopwords;
+if ($precise) {
+    require Lingua::StopWords;
+    %stopwords = %{ Lingua::StopWords::getStopWords('en') };
+}
+
+my $tokenizer = sub {
+    my ($input) = @_;
+    my %occurs;
+    while ($input =~ m{(\w{3,})}gsx) {
+        my $token = lc $1;
+        ++$occurs{$token}
+            unless exists $stopwords{$token};
+    }
+    return \%occurs;
+};
+
 my $bayes = Redis::NaiveBayes->new(
     namespace   => $namespace . ':',
-    tokenizer   => sub {
-        my ($input) = @_;
-        my %occurs;
-        ++$occurs{lc($1)}
-            while $input =~ m{(\w+)}gsx;
-        return \%occurs;
-    },
+    tokenizer   => $tokenizer,
 );
 
 my @files;
 find {
-    no_chdir => 1,
-    wanted => sub {
+    no_chdir    => 1,
+    wanted      => sub {
         my $file = $_;
         return
             if -d
@@ -180,6 +192,10 @@ Useful for quick estimation.
 
 Redis namespace.
 Default: C<newsgroups>
+
+=item C<--precise>
+
+Use L<Lingua::StopWords> to get more precision.
 
 =item C<--seed=INTEGER>
 
