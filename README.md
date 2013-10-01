@@ -106,9 +106,10 @@ the number of roundtrips to Redis.
 
 [Redis](http://search.cpan.org/perldoc?Redis), [Redis::Bayes](http://search.cpan.org/perldoc?Redis::Bayes), [Algorithm::NaiveBayes](http://search.cpan.org/perldoc?Algorithm::NaiveBayes)
 
-# AUTHOR
+# AUTHORS
 
-Caio Romão <cpan@caioromao.com>
+- Caio Romão <cpan@caioromao.com>
+- Stanislaw Pusep <stas@sysd.org>
 
 # COPYRIGHT AND LICENSE
 
