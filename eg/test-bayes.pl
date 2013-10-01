@@ -86,8 +86,8 @@ for my $file (shuffle @files) {
         and $total > (2 ** 10) * $maxsize;
 
     my ($correct) = (split m{/}x, $file)[-2];
-    ++$categories{$correct}; 
-    
+    ++$categories{$correct};
+
     if ($train) {
         $bayes->train($correct => $data);
     } else {
