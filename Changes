@@ -1,4 +1,7 @@
 {{$NEXT}}
+
+0.0.4   2014-02-23
+        - Make build/test work on Windows
         - Added tool for performance/precision benchmarking under eg/
 
 0.0.3   2013-09-23
